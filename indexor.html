@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Educational Platform Architecture & Workflows</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.6.1/mermaid.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        .diagram-container {
+            background: white;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1, h2 {
+            color: #333;
+        }
+        .mermaid {
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <h1>High level overview of system architecture Author: Mahrukh</h1>
+
+    <div class="diagram-container">
+        <h2>System Architecture Overview - Complete</h2>
+        <div class="mermaid">
+            graph TB
+            subgraph Frontend_Layer ["Frontend Layer"]
+                UI["Web UI\nJinja2 Templates + JavaScript\n• Paste Event Listeners\n• Active Time Tracking\n• Version Scrubber UI\n• Range Selection for Comments"]
+            end
+            subgraph Backend_Layer ["Backend Layer - FastAPI"]
+                API["FastAPI Core\n• Async/Await (Starlette)\n• Dependency Injection\n• Auto OpenAPI Docs"]
+                AUTH["JWT Auth (python-jose)\nAuthCacheMiddleware\n• Token Validation\n• Cache-Control Headers"]
+                ROUTES["Route Handlers\nwith Depends()"]
+                subgraph Route_Modules ["Route Modules"]
+                    SR["student_routes.py\n• /autosave endpoint\n• SSE streaming\n• Due date checks"]
+                    IR["instructor_routes.py\n• Grading panel\n• Version playback\n• Text comments"]
+                    PGR["plot_genius_routes.py\n• DataFrame processing\n• PNG generation"]
+                    GGR["grammar_genius_routes.py\n• Multiple LLM calls\n• Structured responses"]
+                end
+            end
+            subgraph AI_Services_Layer ["AI Services Layer"]
+                LLM["OpenAI GPT-4\nAsyncOpenAI Client"]
+                subgraph AI_Features ["AI Features (config.py prompts)"]
+                    QUIZ["QUIZ Assistant\n• SSE Streaming\n• Context: editor content\n• Chat history included"]
+                    GRAMMAR["Grammar Genius\n• Readability (Flesch)\n• Tone Analysis\n• Grammar/Spelling/Clarity"]
+                    INTENT["Intent Classifier\nPrevent essay writing"]
+                end
+                PLOT["PlotGenius\n• pandas DataFrame\n• matplotlib figures\n• seaborn styling\n• BytesIO buffer"]
+                CITE["Citation Search\n• BeautifulSoup4 parsing\n• aiohttp async requests\n• Academic scraping\n• search_citations_for_text"]
+            end
+            subgraph Data_Layer ["Data Layer"]
+                PG[("PostgreSQL\nTimezone-aware dates")]
+                subgraph Core_Tables ["Core Tables (models.py)"]
+                    SUB_T["Submission & SubmissionVersion\n• version_number (incremental)\n• is_paste_event (boolean)\n• time_spent_seconds (int)\n• change_type (enum)\n• content_diff/snapshot\n• server timestamp"]
+                    CHAT_T["ChatMessage\n• sender_type enum\n• Full conversation log\n• Linked to submission"]
+                    COM_T["TextComment\n• range_index (start)\n• range_length (chars)\n• Precise text targeting"]
+                end
+                REDIS[("Redis Cache\nSession Storage")]
+                ALEMBIC["Alembic Migrations\nSchema versioning"]
+                CRUD["crud.py Functions\n• create_or_update_submission\n• reconstruct_content_at_version\n• joinedload optimization"]
+                DIFF["difflib\nVersion reconstruction"]
+            end
+            UI <--> API
+            API --> AUTH
+            AUTH --> ROUTES
+            ROUTES --> SR
+            ROUTES --> IR
+            ROUTES --> PGR
+            ROUTES --> GGR
+            SR <--> LLM
+            GGR <--> LLM
+            LLM --> QUIZ
+            LLM --> GRAMMAR
+            LLM --> INTENT
+            PGR <--> PLOT
+            SR <--> CITE
+            ROUTES <--> CRUD
+            CRUD <--> PG
+            CRUD <--> DIFF
+            PG --> SUB_T
+            PG --> CHAT_T
+            PG --> COM_T
+            ROUTES <--> REDIS
+            ALEMBIC --> PG
+            style UI fill:#e1f5fe
+            style API fill:#fff3e0
+            style LLM fill:#f3e5f5
+            style PG fill:#e8f5e9
+            style REDIS fill:#e8f5e9
+            style SUB_T fill:#fff9c4
+            style PLOT fill:#c8e6c9
+            style CITE fill:#ffccbc
+            style DIFF fill:#d7ccc8
+        </div>
+    </div>
+
+    <div class="diagram-container">
+        <h2>Instructor Workflow - Complete Grading Analytics</h2>
+        <div class="mermaid">
+            flowchart LR
+            A["Instructor Login<br>role='instructor'"] --> B[Dashboard]
+            B --> C{Choose Action}
+            C --> D["Create Course"]
+            D --> E["Generate unique join_code<br>Set timezone"]
+            E --> F["Create Assignments<br>UTC due_date conversion"]
+            C --> G["Manage Enrollment"]
+            G --> H["Share join_code"]
+            G --> I["Add from School roster<br>crud.get_students_by_school"]
+            C --> J["Open Grading Panel<br>instructor submissions id grade"]
+            J --> FETCH["Massive Data Aggregation"]
+            FETCH --> AGG["crud.get_submission with:<br>joinedload(Student)<br>joinedload(Assignment.Course)<br>All SubmissionVersions ordered<br>All ChatMessages<br>All TextComments"]
+            AGG --> PANEL["Interactive Dashboard"]
+            PANEL --> V1["Final Submission View"]
+            V1 --> SEL["JavaScript Text Selection<br>Capture range_index & length"]
+            SEL --> TCOM["POST /text_comments<br>Create TextComment with:<br>range_index (start)<br>range_length (chars)<br>comment_content"]
+            PANEL --> V2["Version History Playback"]
+            V2 --> SCRUB["Version Scrubber UI<br>List all versions"]
+            SCRUB --> LOAD["Select version N"]
+            LOAD --> RECON["GET /versions/id/content<br>crud.reconstruct_content_at_version()"]
+            RECON --> DIFF["Apply diffs sequentially:<br>Start with empty<br>For each version <= N<br>Apply diff or use snapshot"]
+            DIFF --> SHOW["Display with metadata:<br>Timestamp<br>is_paste_event flag<br>time_spent_seconds<br>change_type enum"]
+            PANEL --> V3["Process Analytics Display"]
+            V3 --> CALC["Calculate from versions:<br>Total time: sum(time_spent)<br>Paste count: count(is_paste)<br>Version count: max(version_num)<br>Writing velocity: words/time"]
+            PANEL --> V4["AI Chat History"]
+            V4 --> CHAT["Display all ChatMessages:<br>STUDENT messages<br>ASSISTANT responses<br>Timestamps<br>Full context visible"]
+            PANEL --> GRADE["Grading Actions"]
+            GRADE --> SCORE["Assign numeric grade"]
+            GRADE --> OVERALL["instructor_comments field"]
+            GRADE --> SAVE["crud.update_submission()"]
+            
+            style A fill:#ffebee
+            style J fill:#e8f5e9
+            style D fill:#fff3e0
+            style PANEL fill:#e3f2fd
+            style V3 fill:#fff9c4
+            style DIFF fill:#d7ccc8
+            style AGG fill:#c5e1a5
+        
+        </div>
+    </div>
+
+    <div class="diagram-container">
+        <h2>Student Workflow - Complete Process Tracking</h2>
+        <div class="mermaid">
+            flowchart TD
+            A["Student Login<br>JWT Cookie Set"] --> B["Dashboard<br>Progress & Average Grades"]
+            B --> C{"Choose Action"}
+            
+            C --> D["Join Course"]
+            D --> E["Enter Unique join_code"]
+            E --> ENROLL["crud.enroll_student()"]
+            
+            C --> F["Open Assignment"]
+            F --> DUE["crud.check_due_date()<br>Timezone-aware check"]
+            DUE -->|Past Due| BLOCK["Assignment Locked<br>No saves allowed"]
+            DUE -->|Active| G["Editor Interface<br>JavaScript initialized"]
+            
+            G --> INIT["Initialize Tracking:<br>• lastSaveTime = Date.now()<br>• activeTime = 0<br>• Paste listener active"]
+            
+            INIT --> H["Write Content"]
+            
+            H --> TRACK["Frontend Tracking:<br>• visibilitychange events<br>• activeElement checks<br>• Second-by-second time count"]
+            
+            H --> PASTE["Paste Event Detected<br>clipboardData.getData()"]
+            PASTE --> PFLAG["Immediate Autosave<br>is_paste_event = true"]
+            PFLAG --> SAVE
+            
+            TRACK --> TIMER["Timer: 5-10 seconds"]
+            TIMER --> SAVE["POST /autosave<br>{<br>content: editor.value,<br>time_spent_seconds: activeTime,<br>is_paste_event: boolean<br>}"]
+            
+            SAVE --> VAL["Backend Validation:<br>• JWT check<br>• Due date check<br>• Pydantic schema"]
+            VAL --> CRUD["crud.create_or_update_submission():<br>• Find/create Submission<br>• Create SubmissionVersion<br>• Store diff/snapshot<br>• Update final_content"]
+            CRUD --> H
+            
+            G --> QUIZ["QUIZ AI Chat<br>EventSourceResponse"]
+            QUIZ --> QMSG["POST /messages/stream<br>{message, current_content}"]
+            QMSG --> QPROMPT["Build Prompt:<br>• config.QUIZ_SYSTEM_PROMPT<br>• Recent chat history<br>• Full editor content"]
+            QPROMPT --> QSTREAM["AsyncOpenAI stream=True<br>SSE chunks to client"]
+            QSTREAM --> QSAVE["crud.create_chat_message()"]
+            
+            G --> GG["Grammar Genius Suite"]
+            GG --> GG1["Readability: Flesch score"]
+            GG --> GG2["Tone: Formal/Casual/Academic"]
+            GG --> GG3["Issues: Grammar/Spelling/Clarity<br>|||-delimited response"]
+            
+            G --> PG["PlotGenius"]
+            PG --> PGDATA["Submit data structure"]
+            PGDATA --> PGPROC["pandas.DataFrame<br>matplotlib.figure<br>seaborn styling"]
+            PGPROC --> PGRET["Return PNG bytes<br>media_type='image/png'"]
+            
+            G --> CIT["Citation Search"]
+            CIT --> CITQ["search_citations_for_text()"]
+            CITQ --> CITSCRAPE["aiohttp + BeautifulSoup4<br>Academic site scraping"]
+            
+            H --> SUBMIT["Submit Final"]
+            SUBMIT --> FINAL["Mark submission complete<br>Set submitted_at timestamp"]
+            
+            style A fill:#ffebee
+            style QUIZ fill:#f3e5f5
+            style GG fill:#f3e5f5
+            style PG fill:#e8f5e9
+            style PASTE fill:#fff3e0
+            style BLOCK fill:#ffcdd2
+            style CRUD fill:#e3f2fd
+            style TRACK fill:#fff9c4
+        
+        </div>
+    </div>
+
+    <div class="diagram-container">
+        <h2>AI Services Integration - Technical Implementation</h2>
+        <div class="mermaid">
+        sequenceDiagram
+            participant S as Student
+            participant F as Frontend JS
+            participant B as Backend (FastAPI)
+            participant AI as OpenAI API
+            participant DB as PostgreSQL
+            participant EXT as External Services
+            
+            Note over S,EXT: Autosave with Complete Process Tracking
+            S->>F: Type in editor (activeElement check)
+            F->>F: Track time per second<br/>visibilitychange listener
+            F->>F: Detect paste event<br/>event.clipboardData
+            F->>B: POST /api/v1/assignments/{id}/autosave<br/>SubmissionVersionCreateBody schema<br/>{content, time_spent_seconds, is_paste_event}
+            B->>B: Validate JWT & due_date
+            B->>DB: crud.create_or_update_submission()<br/>Transaction: Submission + VersionV<br/>Store diff using difflib
+            DB-->>B: Version saved with timestamp
+            B-->>F: 200 OK with version_number
+            
+            Note over S,EXT: QUIZ AI Assistant (Real-time SSE)
+            S->>F: Open chat panel
+            F->>B: POST /api/v1/submissions/{id}/messages/stream<br/>ChatMessageCreate schema
+            B->>B: Build context:<br/>• config.QUIZ_SYSTEM_PROMPT<br/>• crud.get_chat_messages(limit=10)<br/>• Current editor content
+            B->>AI: AsyncOpenAI.chat.completions.create<br/>model="gpt-4", stream=True
+            AI-->>B: Async generator chunks
+            B-->>F: EventSourceResponse (sse-starlette)<br/>yield f"data: {json.dumps({'content': chunk})}\n\n"
+            F-->>S: Real-time display via EventSource
+            B->>DB: crud.create_chat_message() x2<br/>Store student msg & AI response
+            
+            Note over S,EXT: Grammar Genius (Parallel Analysis)
+            S->>F: Select text for analysis
+            F->>B: POST /api/v1/grammar_check<br/>{text: selected_text}
+            B->>AI: Multiple parallel calls:<br/>1. Readability prompt → Flesch score<br/>2. Tone prompt → single word<br/>3. Issues prompt → |||-delimited
+            AI-->>B: Structured responses
+            B->>B: Parse responses:<br/>int(readability), tone.strip(), issues.split("|||")
+            B-->>F: GrammarCheckResponse schema
+            F-->>S: Display inline feedback
+            
+            Note over S,EXT: PlotGenius (Server-side Rendering)
+            S->>F: Submit plot data
+            F->>B: POST /api/plot-genius/generate<br/>PlotRequest schema
+            B->>B: pd.DataFrame(request.data)<br/>plt.figure(figsize=(10,6))<br/>Plot based on type (line/bar/scatter/hist)<br/>Customize with title, labels
+            B->>B: Save to BytesIO buffer<br/>plt.savefig(buf, format='png')<br/>plt.close() for cleanup
+            B-->>F: Response(content=buf.read(),<br/>media_type="image/png")
+            F-->>S: Display PNG image
+            
+            Note over S,EXT: Citation Search (Async Web Scraping)
+            S->>F: Search for citations
+            F->>B: POST /api/citations/search<br/>{query: search_text}
+            B->>B: search_citations_for_text()
+            B->>EXT: aiohttp async requests<br/>to academic sites
+            EXT-->>B: HTML responses
+            B->>B: BeautifulSoup4 parsing<br/>Extract citations & metadata
+            B-->>F: Formatted citation list
+            F-->>S: Display citations
+        </div>
+    </div>
+
+    <div class="diagram-container">
+        <h2>Data Model - Complete Schema with Process Analytics</h2>
+        <div class="mermaid">
+        erDiagram
+            SCHOOL ||--o{ USER : contains
+            USER ||--o{ COURSE : teaches
+            USER ||--o{ ENROLLMENT : enrolled_in
+            COURSE ||--o{ ENROLLMENT : has
+            COURSE ||--o{ ASSIGNMENT : contains
+            ASSIGNMENT ||--o{ SUBMISSION : receives
+            USER ||--o{ SUBMISSION : creates
+            SUBMISSION ||--o{ SUBMISSIONVERSION : tracks
+            SUBMISSION ||--o{ CHATMESSAGE : includes
+            SUBMISSION ||--o{ TEXTCOMMENT : receives
+            USER ||--o{ TEXTCOMMENT : writes
+            
+            SCHOOL {
+                int school_id PK
+                string name
+                string location
+            }
+            
+            USER {
+                int user_id PK
+                int school_id FK
+                string email UK
+                string password_hash
+                enum role "student|instructor"
+                timestamp created_at
+            }
+            
+            COURSE {
+                int course_id PK
+                int instructor_id FK
+                string name
+                string join_code UK "unique generated"
+                string timezone "for due dates"
+                timestamp created_at
+            }
+            
+            ASSIGNMENT {
+                int assignment_id PK
+                int course_id FK
+                string title
+                text description
+                datetime due_date "timezone-aware"
+                timestamp created_at
+            }
+            
+            SUBMISSION {
+                int submission_id PK
+                int student_id FK
+                int assignment_id FK
+                text final_content "latest version"
+                float grade "nullable"
+                text instructor_comments
+                enum status "in_progress|submitted"
+                timestamp created_at
+                timestamp submitted_at "nullable"
+                timestamp last_updated
+            }
+            
+            SUBMISSIONVERSION {
+                int version_id PK
+                int submission_id FK
+                int version_number "incremental"
+                timestamp timestamp "server-generated"
+                text content_diff "difflib output"
+                text full_content_snapshot "periodic"
+                bool is_paste_event "paste detected"
+                int time_spent_seconds "active time"
+                enum change_type "AUTOSAVE|MANUAL_SAVE"
+            }
+            
+            CHATMESSAGE {
+                int message_id PK
+                int submission_id FK
+                enum sender_type "STUDENT|ASSISTANT"
+                text content "full message"
+                timestamp created_at
+            }
+            
+            TEXTCOMMENT {
+                int comment_id PK
+                int submission_id FK
+                int commenter_id FK
+                int range_index "text start position"
+                int range_length "selection length"
+                text comment_content
+                timestamp created_at
+            }
+        </div>
+    </div>
+
+    <div class="diagram-container">
+        <h2>API Endpoint Structure</h2>
+        <div class="mermaid">
+        graph TD
+            subgraph SR["Student Routes"]
+                SD["/dashboard"]
+                SC["/courses"]
+                SJ["/join"]
+                SA["/assignments"]
+                SAE["/editor"]
+                SAS["/autosave"]
+                SAC["/messages"]
+                SAG["/grammar_check"]
+                SUB["/submit"]
+                
+                SD --> SC
+                SC --> SJ
+                SA --> SAE
+                SAE --> SAS
+                SAE --> SAC
+                SAE --> SAG
+                SAE --> SUB
+            end
+            
+            subgraph IR["Instructor Routes"]
+                ID["/dashboard"]
+                IC["/courses"]
+                ICA["/create"]
+                IA["/assignments"]
+                IAC["/assignments/create"]
+                IG["/grading"]
+                IGS["/submissions"]
+                IGV["/versions"]
+                IGC["/comments"]
+                IGG["/grade"]
+                
+                ID --> IC
+                IC --> ICA
+                IC --> IA
+                IA --> IAC
+                IG --> IGS
+                IGS --> IGV
+                IGS --> IGC
+                IGS --> IGG
+            end
+            
+            subgraph AR["Auth Routes"]
+                AL["/login"]
+                ARE["/register"]
+                ALO["/logout"]
+            end
+            
+            style SD fill:#e3f2fd
+            style ID fill:#fff3e0
+            style AL fill:#ffebee
+        </div>
+    </div>
+
+    <div class="diagram-container">
+        <h2>Comprehensive Grading Panel - Data Flow & Features</h2>
+        <div class="mermaid">
+            flowchart TB
+    subgraph GP["Grading Panel Interface (/instructor/submissions/{id}/grade)"]
+        ROUTE["Route Handler"] --> DEPS["Dependencies:<br>• Depends(get_db)<br>• Depends(get_current_instructor)"]
+        
+        DEPS --> AGG["Data Aggregation via crud.py"]
+        
+        AGG --> Q1["get_submission() with:<br>joinedload(Student)<br>joinedload(Assignment.Course)"]
+        AGG --> Q2["get_submission_versions()<br>ORDER BY version_number"]
+        AGG --> Q3["get_chat_messages_for_submission()<br>All STUDENT & ASSISTANT msgs"]
+        AGG --> Q4["get_text_comments()<br>All instructor feedback"]
+        
+        Q1 --> RENDER["Jinja2 Template Render"]
+        Q2 --> RENDER
+        Q3 --> RENDER
+        Q4 --> RENDER
+        
+        RENDER --> UI["Interactive Dashboard"]
+        
+        subgraph VIEWS["Three Main Views (Tabs)"]
+            FV["Final Submission View<br>• Rendered text<br>• Inline comments overlay<br>• Text selection capture"]
+            HV["Version History View<br>• Version scrubber (1-47)<br>• Timestamp display<br>• Paste event flags<br>• Time gaps visualization"]
+            CV["Chat History View<br>• Full conversation<br>• Timestamps<br>• Message sender icons<br>• Context visibility"]
+        end
+        
+        UI --> FV
+        UI --> HV
+        UI --> CV
+        
+        subgraph ANALYTICS["Process Analytics Panel"]
+            CALC["Calculated Metrics:<br>• Total active time: Σ(time_spent)<br>• Paste events: COUNT(is_paste)<br>• Version count: MAX(version_num)<br>• Writing velocity: words/minute<br>• Revision patterns: major changes"]
+            VIS["Visualizations:<br>• Activity heatmap<br>• Writing timeline<br>• Edit frequency graph"]
+        end
+        
+        HV --> PLAYBACK["Version Playback Engine"]
+        PLAYBACK --> AJAX["AJAX: GET /api/v1/submission_versions/{id}/content"]
+        AJAX --> RECON["reconstruct_content_at_version()"]
+        
+        RECON --> ALGO["Reconstruction Algorithm:<br>1. Start with empty string<br>2. Query versions WHERE version <= N<br>3. For each version:<br>&nbsp;&nbsp;- If has snapshot: use it<br>&nbsp;&nbsp;- Else: apply diff<br>4. Return reconstructed content"]
+        
+        FV --> COMMENT["Add Inline Comment"]
+        COMMENT --> CAPTURE["JavaScript captures:<br>• getSelection()<br>• range.startOffset<br>• range.endOffset"]
+        CAPTURE --> POST["POST /text_comments<br>{range_index, range_length,<br>comment_content}"]
+        
+        UI --> GRADE["Grading Actions"]
+        GRADE --> FINAL["• Numeric grade (0-100)<br>• Overall comments<br>• Submit button"]
+        FINAL --> UPDATE["crud.update_submission()"]
+    end
+    
+    style ROUTE fill:#e3f2fd
+    style AGG fill:#c5e1a5
+    style CALC fill:#fff9c4
+    style RECON fill:#d7ccc8
+    style ALGO fill:#ffccbc
+
+        </div>
+    </div>
+
+    <script>
+        mermaid.initialize({ 
+            startOnLoad: true,
+            theme: 'default',
+            flowchart: {
+                useMaxWidth: true,
+                htmlLabels: true
+            }
+        });
+    </script>
+
+    <div class="diagram-container">
+        <h2>Authentication & Middleware Flow</h2>
+        <div class="mermaid">
+        sequenceDiagram
+            participant C as Client Browser
+            participant M as AuthCacheMiddleware
+            participant R as Route Handler
+            participant A as auth.py
+            participant DB as Database
+            
+            Note over C,DB: Login Flow
+            C->>R: POST /auth/login<br/>{email, password}
+            R->>A: authenticate_user()
+            A->>DB: Query user by email
+            DB-->>A: User object
+            A->>A: pwd_context.verify(password, hash)
+            A->>A: create_access_token()<br/>JWT with user_id, role, exp
+            A-->>R: access_token
+            R-->>C: Set cookie: access_token<br/>httponly=True, samesite='lax'
+            
+            Note over C,DB: Protected Request Flow
+            C->>M: GET /student/dashboard<br/>Cookie: access_token
+            M->>M: Check if path is protected<br/>PROTECTED_PATHS list
+            M->>A: decode_token(access_token)
+            A->>A: jwt.decode() with SECRET_KEY
+            A-->>M: Token payload or None
+            
+            alt Token Invalid/Missing
+                M-->>C: 302 Redirect to /login
+            else Token Valid
+                M->>DB: get_user(user_id)
+                DB-->>M: User object
+                M->>M: Inject user into request.scope
+                M->>M: Add Cache-Control headers
+                M->>R: Forward request
+                R->>R: user = Depends(get_current_user)
+                R-->>C: Protected content
+            end
+            
+            Note over C,DB: Role-Based Access
+            C->>R: GET /instructor/courses
+            R->>R: Depends(get_current_active_instructor)
+            R->>R: Check user.role == 'instructor'
+            alt Wrong Role
+                R-->>C: 403 Forbidden
+            else Correct Role
+                R-->>C: Instructor content
+            end
+        </div>
+    </div>
+
+    <div class="diagram-container">
+        <h2>Version Control & Reconstruction System</h2>
+        <div class="mermaid">
+            flowchart TB
+            subgraph SAVE["Autosave Process"]
+                JS[JavaScript Editor] --> DETECT{Event Type}
+                DETECT -->|Timer| AUTO[Regular Autosave]
+                DETECT -->|Paste Event| PASTE[Immediate Save is paste event true]
+                
+                AUTO --> PAYLOAD[Create Payload: content full text, time spent seconds, is paste event]
+                PASTE --> PAYLOAD
+                
+                PAYLOAD --> API[POST /autosave]
+                API --> CREATE_OR_UPDATE[Create or Update Submission]
+            end
+            
+            subgraph VERSION["Version Creation"]
+                CREATE_OR_UPDATE --> FIND[Find or Create Submission]
+                FIND --> COUNT[Get version count]
+                COUNT --> NEW[Create Submission Version: version number equals count plus one, timestamp equals server time, change type enum, Process metadata]
+                
+                NEW --> DIFF{Storage Strategy}
+                DIFF -->|Every 10th| SNAP[Store full content snapshot]
+                DIFF -->|Others| DELTA[Create content diff made using difflib unified diff]
+                
+                SNAP --> SAVE_DB[(Save to DB)]
+                DELTA --> SAVE_DB
+                SAVE_DB --> UPDATE[Update Submission final content]
+            end
+            
+            subgraph PLAYBACK["Version Reconstruction"]
+                REQUEST[GET /versions/id/content] --> FETCH[Fetch all versions less than or equal to N ORDER BY version number]
+                
+                FETCH --> INIT[content is empty]
+                INIT --> LOOP{For each version}
+                
+                LOOP -->|Has snapshot| USE[content is snapshot]
+                LOOP -->|Has diff| APPLY[content is apply diff content diff]
+                
+                USE --> NEXT{More versions?}
+                APPLY --> NEXT
+                NEXT -->|Yes| LOOP
+                NEXT -->|No| RETURN[Return reconstructed content]
+                
+                RETURN --> META[Include metadata: is paste event, time spent seconds, timestamp, change type]
+            end
+            
+            style PASTE fill:#fff3e0
+            style CREATE_OR_UPDATE fill:#e3f2fd
+            style DIFF fill:#d7ccc8
+            style META fill:#fff9c4
+        
+        </div>
+    </div>
+
+    <div class="diagram-container">
+        <h2>PlotGenius Technical Implementation</h2>
+        <div class="mermaid">
+        sequenceDiagram
+            participant S as Student
+            participant UI as Frontend
+            participant API as plot_genius_routes.py
+            participant PD as pandas
+            participant PLT as matplotlib/seaborn
+            
+            S->>UI: Input data & parameters
+            UI->>API: POST /api/plot-genius/generate<br/>PlotRequest schema:<br/>{data: array, plot_type: string,<br/>x_column, y_column, title, labels}
+            
+            API->>API: Validate with Pydantic
+            API->>PD: pd.DataFrame(request.data)
+            PD-->>API: DataFrame object
+            
+            API->>PLT: plt.figure(figsize=(10, 6))
+            
+            alt Line Plot
+                API->>PLT: plt.plot(df[x], df[y])
+            else Bar Chart
+                API->>PLT: plt.bar(df[x], df[y])
+            else Scatter Plot
+                API->>PLT: plt.scatter(df[x], df[y])
+            else Histogram
+                API->>PLT: plt.hist(df[col], bins=n)
+            else Seaborn Heatmap
+                API->>PLT: sns.heatmap(df.corr())
+            end
+            
+            API->>PLT: Customize:<br/>plt.title(), plt.xlabel(), plt.ylabel()
+            API->>API: Create BytesIO buffer
+            API->>PLT: plt.savefig(buf, format='png')
+            API->>PLT: plt.close() # Cleanup
+            
+            API-->>UI: Response(buf.read(),<br/>media_type="image/png")
+            UI-->>S: Display PNG image
+            
+            Note over S,PLT: Error Handling
+            API->>API: try/except block
+            API->>API: Always plt.close() in finally
+        </div>
+    </div>
+</body>
+</html>
